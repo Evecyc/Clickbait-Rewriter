@@ -25,25 +25,27 @@ generation_config = {
 
 def filter_titles(titles, urls):
     """ 過濾非新聞標題的內容，並清理涵蓋其他資訊的標題格式 """
-    filtered_pairs = [
-        (title, url) for title, url in zip(titles, urls)
-        if len(title) > 10 and len(title) < 30
-        and not re.match(r"^[0-9a-zA-Z\s\W]+$", title)
-        and "ad." not in url
-        and "AdAd" not in title and "免費訂閱《ETtoday電子報》" not in title
-    ]
+    filtered_pairs = []
 
-    filtered_pairs = [
-        (re.sub(r'^\d{1,2}:\d{2}\s*', '', title).strip(), url) if re.match(r'^\d{1,2}:\d{2}', title) else (title, url)
-        for title, url in filtered_pairs
-    ]
+    for title, url in zip(titles, urls):
+        clean_title = title.split("\n")[0].strip()
 
-    filtered_pairs = [
-        (title.split("\n")[0].strip(), url) if "\n" in title else (title, url)
-        for title, url in filtered_pairs
-    ]
+        # 過濾條件
+        if (
+            len(clean_title) < 10 or len(clean_title) > 30  # 長度限制
+            or re.match(r"^[\d/:\s]+$", clean_title)  # 僅為時間或數字
+            or any(keyword in clean_title for keyword in ["分類", "播放", "訂閱", "LIVE", "OFF", "PLAY", "AdAd", "求職網", "財經", "風傳媒"])  # 黑名詞
+            or "ad." in url
+            or clean_title in ["", None]
+        ):
+            continue
 
-    filtered_titles, filtered_urls = zip(*filtered_pairs) if filtered_pairs else ([], [])
+        filtered_pairs.append((clean_title, url))
+
+    if not filtered_pairs:
+        return [], []
+    
+    filtered_titles, filtered_urls = zip(*filtered_pairs)
     return list(filtered_titles), list(filtered_urls)
 
 def fetch_article_content(url):
@@ -67,15 +69,13 @@ def fetch_article_content(url):
         soup = BeautifulSoup(response.text, "html.parser")
 
         nownews = None
-        ltn = None
         udn = None
         yahoo = None
         ettoday = None
+        storm = None
 
         if "nownews.com" in url:
             nownews = soup.find("div", id="articleContent")
-        elif "ltn.com" in url:
-            ltn = soup.find("div", class_="text")
         elif "udn.com" in url:
             udn = soup.find("div", class_="article-content__paragraph")
             if not udn:
@@ -88,19 +88,17 @@ def fetch_article_content(url):
                 udn = soup.find("article", class_="story-article ")
         elif "yahoo.com" in url:
             yahoo = soup.find("div", class_="caas-body")
+            if not yahoo:
+                yahoo = soup.find("div", class_="caas-content-wrapper")
         elif "ettoday.net" in url:
             ettoday = soup.find("div", class_="story")
+        elif "storm.mg" in url:
+            storm = soup.find("article")
         else:
             return "Error: unsupported URL"
 
         if nownews:
             text = nownews.get_text(separator="\n", strip=True)
-        elif ltn:
-            text = " ".join(
-            p.get_text() 
-            for p in ltn.find_all("p") 
-            if not (p.get("class") == ['appE1121'])
-            )
         elif udn:
             text = " ".join(
             p.get_text() 
@@ -111,6 +109,8 @@ def fetch_article_content(url):
             text = " ".join(p.get_text() for p in yahoo.find_all("p"))
         elif ettoday:
             text = " ".join(p.get_text() for p in ettoday.find_all("p"))
+        elif storm:
+            text = " ".join(p.get_text() for p in storm.find_all("p"))
         else:
             return "Error: no content found"
 
@@ -130,9 +130,9 @@ def generate_title(original_title, article_content, retries=0):
     title_prompt = f"""
     從給定的文章內容：
     {article_content}
-    針對原始標題「{original_title}」，生成一個新的標題，該標題應[明確回答/說明/點出]原始標題中[提出的疑問/暗示的內容/未明確說明的細節]，不留任何伏筆。
-    若原始標題使用數量詞（如「[數字]種」）或指示代詞（如「這個」）指代具體事物，新標題應簡要說明這些事物是什麼。
-    若無法完整說明原始標題中的內容，則應以最精簡的文字摘要文章內容。
+    針對原始標題「{original_title}」，生成一個新的標題，該標題應[明確回答/說明/點出]原始標題中[提出的疑問/暗示的內容/未明確說明的細節]，不留任何模糊或誇張詞語。
+    若原始標題使用數量詞（如「[數字]種」）或指示代詞（如「這個」）指代具體事物，新標題應說明其具體內容。
+    若無法完整說明原始標題中的內容，則應以最精簡的文字摘要文章內容，並避免和原始標題使用類似語句。
     # 輸出 json 格式: {{"title": "標題"}}
     """
     if "Error" in article_content:
@@ -186,7 +186,7 @@ def classify_titles():
 
     clickbait_count = len([result for result in results if result["label"] == "LABEL_1"])
     print(f"Clickbait titles: {clickbait_count}")    
-    
+
     # 回傳 clickbait 標題
     clickbait_titles = [
     {
