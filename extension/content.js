@@ -1,0 +1,1 @@
+console.log("[Clickbait Rewriter] content script loaded.");
