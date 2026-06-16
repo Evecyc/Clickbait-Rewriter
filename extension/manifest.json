@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Clickbait Rewriter",
+  "version": "0.1.0",
+  "description": "Detects clickbait-style headlines and rewrites them with article context.",
+  "permissions": ["activeTab"],
+  "host_permissions": [
+    "https://tw.news.yahoo.com/*",
+    "https://www.ettoday.net/*",
+    "https://www.nownews.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://tw.news.yahoo.com/*",
+        "https://www.ettoday.net/*",
+        "https://www.nownews.com/*"
+      ],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
