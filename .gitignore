@@ -1,11 +1,28 @@
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Environment
 .env
 .venv/
 venv/
 
+# Local data and cache
 backend/data/cache/
+.cache/
+*.log
+
+# macOS
 .DS_Store
 
+# Node / frontend build
 node_modules/
 dist/
+
+# Editor
+.vscode/
+.idea/
