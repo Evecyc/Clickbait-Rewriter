@@ -2,3 +2,22 @@
   outline: 2px solid rgba(0, 120, 255, 0.8) !important;
   background-color: rgba(0, 120, 255, 0.08) !important;
 }
+
+.cr-clickbait-highlight {
+  background-color: rgba(255, 230, 0, 0.45) !important;
+  outline: 2px solid rgba(255, 180, 0, 0.9) !important;
+}
+
+.cr-tooltip {
+  position: absolute;
+  max-width: 420px;
+  white-space: pre-wrap;
+  background: #ffffff;
+  border: 1px solid #cccccc;
+  padding: 8px 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  z-index: 999999;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #222222;
+}
