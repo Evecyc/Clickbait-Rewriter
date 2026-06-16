@@ -1,3 +1,4 @@
+// Config
 const MAX_TITLE_CANDIDATES = 200;
 const MIN_TITLE_LENGTH = 8;
 const MAX_TITLE_LENGTH = 60;
@@ -19,16 +20,11 @@ const BLOCKED_URL_PATTERNS = [
   "/topic/", "/topics/", "/author/", "/archive/"
 ];
 
-const CLICKBAIT_KEYWORDS = [
-  "驚", "震驚", "嚇傻", "傻眼", "曝光", "竟然",
-  "真相", "原因", "內幕", "超狂", "慘了", "爆",
-  "瘋傳", "網友", "必看", "你知道嗎", "揭密"
-];
-
 let lastScanSignature = "";
 let lastScanTime = 0;
 let scanTimer = null;
 
+// Text and URL helpers
 function cleanText(text) {
   return text.replace(/\s+/g, " ").trim();
 }
@@ -57,6 +53,7 @@ function isValidTitleLength(title) {
   return title.length >= MIN_TITLE_LENGTH && title.length <= MAX_TITLE_LENGTH;
 }
 
+// Candidate extraction
 function isVisibleElement(element) {
   const rect = element.getBoundingClientRect();
   const style = window.getComputedStyle(element);
@@ -141,6 +138,7 @@ function buildCandidate(anchor) {
   }
 
   return {
+    id: `${title}::${url}`,
     title,
     url,
     score,
@@ -191,26 +189,7 @@ function collectHeadlineCandidates() {
   };
 }
 
-function mockClassifyTitle(title) {
-  const matchedKeywords = CLICKBAIT_KEYWORDS.filter((keyword) =>
-    title.includes(keyword)
-  );
-
-  if (matchedKeywords.length === 0) {
-    return {
-      label: "non_clickbait",
-      score: 0.18,
-      matchedKeywords
-    };
-  }
-
-  return {
-    label: "clickbait",
-    score: Math.min(0.55 + matchedKeywords.length * 0.12, 0.95),
-    matchedKeywords
-  };
-}
-
+// Tooltip UI
 function removeTooltip() {
   document.querySelectorAll(".cr-tooltip").forEach((tooltip) => {
     tooltip.remove();
@@ -243,6 +222,7 @@ function bindTooltip(anchor) {
   anchor.dataset.crTooltipBound = "true";
 }
 
+// Page UI update
 function clearScanStyles() {
   document.querySelectorAll(".cr-debug-candidate").forEach((element) => {
     element.classList.remove("cr-debug-candidate");
@@ -262,28 +242,53 @@ function applyDebugCandidates(candidates) {
   });
 }
 
-function applyMockClassification(candidates) {
-  candidates.forEach((candidate) => {
-    const result = mockClassifyTitle(candidate.title);
+function buildClassificationTooltip(candidate, classification) {
+  const matchedKeywords = classification.matchedKeywords || [];
 
-    if (result.label !== "clickbait") {
-      return;
-    }
+  return [
+    `Original: ${candidate.title}`,
+    `Label: ${classification.label}`,
+    `Score: ${classification.score.toFixed(2)}`,
+    `Matched: ${matchedKeywords.join(", ") || "none"}`,
+    "Rewrite status: not implemented yet"
+  ].join("\n");
+}
 
-    const tooltipText = [
-      `Original: ${candidate.title}`,
-      `Mock label: ${result.label}`,
-      `Mock score: ${result.score.toFixed(2)}`,
-      `Matched: ${result.matchedKeywords.join(", ") || "none"}`,
-      "Rewrite status: not implemented yet"
-    ].join("\n");
+function applyClassificationResults(candidates, results) {
+  const candidateById = new Map(
+    candidates.map((candidate) => [candidate.id, candidate])
+  );
+
+  results.forEach((result) => {
+    const candidate = candidateById.get(result.id);
+    if (!candidate) return;
+
+    const classification = result.classification;
+    if (classification.label !== "clickbait") return;
 
     candidate.element.classList.add("cr-clickbait-highlight");
-    candidate.element.dataset.crTooltip = tooltipText;
+    candidate.element.dataset.crTooltip = buildClassificationTooltip(candidate, classification);
     bindTooltip(candidate.element);
   });
 }
 
+// Background communication
+function sendCandidatesForClassification(candidates) {
+  const payload = candidates.map(({ id, title, url, score, reasons }) => ({
+    id,
+    title,
+    url,
+    candidateScore: score,
+    candidateReasons: reasons
+  }));
+
+  return chrome.runtime.sendMessage({
+    action: "classifyCandidates",
+    candidates: payload
+  });
+}
+
+// Scan control
 function createScanSignature(candidates) {
   return candidates
     .map((candidate) => `${candidate.title}|${candidate.url}`)
@@ -325,7 +330,19 @@ function runCandidateScan() {
   clearScanStyles();
   logScanResult(result);
   applyDebugCandidates(result.candidates);
-  applyMockClassification(result.candidates);
+
+  sendCandidatesForClassification(result.candidates)
+    .then((response) => {
+      if (!response || response.status !== "ok") {
+        console.warn("[Clickbait Rewriter] Classification failed:", response);
+        return;
+      }
+
+      applyClassificationResults(result.candidates, response.results);
+    })
+    .catch((error) => {
+      console.error("[Clickbait Rewriter] Message error:", error);
+    });
 }
 
 function scheduleCandidateScan() {
