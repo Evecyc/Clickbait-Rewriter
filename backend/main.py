@@ -21,15 +21,7 @@ app.add_middleware(
 )
 
 
-@app.get("/health", response_model=HealthResponse)
-def health_check() -> HealthResponse:
-    return HealthResponse(status="ok", service="clickbait-rewriter-api")
-
-
-@app.post("/api/classify", response_model=ClassifyResponse)
-def classify_headlines(request: ClassifyRequest) -> ClassifyResponse:
-    raw_results = classify_candidates(request.candidates)
-
+def build_classify_response(raw_results: list[dict]) -> ClassifyResponse:
     results = [
         ClassifiedHeadline(
             id=item["id"],
@@ -41,3 +33,17 @@ def classify_headlines(request: ClassifyRequest) -> ClassifyResponse:
     ]
 
     return ClassifyResponse(status="ok", results=results)
+
+
+@app.get("/health", response_model=HealthResponse)
+def health_check() -> HealthResponse:
+    return HealthResponse(
+        status="ok",
+        service="clickbait-rewriter-api",
+    )
+
+
+@app.post("/api/classify", response_model=ClassifyResponse)
+def classify_headlines(request: ClassifyRequest) -> ClassifyResponse:
+    raw_results = classify_candidates(request.candidates)
+    return build_classify_response(raw_results)

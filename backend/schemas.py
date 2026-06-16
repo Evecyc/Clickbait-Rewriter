@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class HealthResponse(BaseModel):
@@ -10,14 +10,17 @@ class HeadlineCandidate(BaseModel):
     id: str
     title: str
     url: str
-    candidateScore: int | float | None = None
-    candidateReasons: list[str] = []
+    candidateScore: float | None = None
+    candidateReasons: list[str] = Field(default_factory=list)
 
 
 class ClassificationResult(BaseModel):
     label: str
     score: float
-    matchedKeywords: list[str] = []
+    matchedKeywords: list[str] = Field(default_factory=list)
+    mode: str | None = None
+    rawLabel: str | None = None
+    error: str | None = None
 
 
 class ClassifiedHeadline(BaseModel):

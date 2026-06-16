@@ -1,5 +1,5 @@
 // Config
-const MAX_TITLE_CANDIDATES = 200;
+const MAX_TITLE_CANDIDATES = 100;
 const MIN_TITLE_LENGTH = 8;
 const MAX_TITLE_LENGTH = 60;
 const MIN_CANDIDATE_SCORE = 2;
@@ -17,7 +17,8 @@ const BLOCKED_TEXT_KEYWORDS = [
 const BLOCKED_URL_PATTERNS = [
   "/login", "/member", "/search", "/tag", "/tags",
   "/category", "/video", "/live", "/event", "/promo",
-  "/topic/", "/topics/", "/author/", "/archive/"
+  "/topic/", "/topics/", "/author/", "/archive/",
+  "ad.", "/ad", "adclick", "doubleclick", "googlesyndication"
 ];
 
 let lastScanSignature = "";
@@ -27,6 +28,10 @@ let scanTimer = null;
 // Text and URL helpers
 function cleanText(text) {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function getCandidateId(title, url) {
+  return `${title}::${url}`;
 }
 
 function getAnchorTitle(anchor) {
@@ -67,6 +72,14 @@ function isVisibleElement(element) {
   );
 }
 
+function hasNearbyAdLabel(anchor) {
+  const container = anchor.closest("li, article, section, div");
+  if (!container) return false;
+
+  const text = cleanText(container.textContent || "");
+  return ["Ad", "廣告", "贊助", "工商"].some((keyword) => text.includes(keyword));
+}
+
 function shouldRejectCandidate(anchor, title, url) {
   if (!title || !url) return true;
   if (!isVisibleElement(anchor)) return true;
@@ -74,6 +87,7 @@ function shouldRejectCandidate(anchor, title, url) {
   if (hasBlockedText(title)) return true;
   if (hasBlockedUrl(url)) return true;
   if (anchor.closest("nav, header, footer")) return true;
+  if (hasNearbyAdLabel(anchor)) return true;
 
   return false;
 }
@@ -138,7 +152,7 @@ function buildCandidate(anchor) {
   }
 
   return {
-    id: `${title}::${url}`,
+    id: getCandidateId(title, url),
     title,
     url,
     score,
@@ -165,18 +179,12 @@ function collectHeadlineCandidates() {
   for (const anchor of anchors) {
     const candidate = buildCandidate(anchor);
 
-    if (!candidate) {
+    if (!candidate || seen.has(candidate.id)) {
       excluded += 1;
       continue;
     }
 
-    const key = `${candidate.title}::${candidate.url}`;
-    if (seen.has(key)) {
-      excluded += 1;
-      continue;
-    }
-
-    seen.add(key);
+    seen.add(candidate.id);
     candidates.push(candidate);
   }
 
@@ -223,34 +231,34 @@ function bindTooltip(anchor) {
 }
 
 // Page UI update
-function clearScanStyles() {
+function clearDebugHighlights() {
   document.querySelectorAll(".cr-debug-candidate").forEach((element) => {
     element.classList.remove("cr-debug-candidate");
   });
+}
 
-  document.querySelectorAll(".cr-clickbait-highlight").forEach((element) => {
-    element.classList.remove("cr-clickbait-highlight");
-    delete element.dataset.crTooltip;
+function clearClassificationHighlights(candidates) {
+  candidates.forEach((candidate) => {
+    candidate.element.classList.remove("cr-clickbait-highlight");
+    delete candidate.element.dataset.crTooltip;
   });
 
   removeTooltip();
 }
 
-function applyDebugCandidates(candidates) {
+function applyDebugHighlights(candidates) {
   candidates.forEach((candidate) => {
     candidate.element.classList.add("cr-debug-candidate");
   });
 }
 
 function buildClassificationTooltip(candidate, classification) {
-  const matchedKeywords = classification.matchedKeywords || [];
-
   return [
-    `Original: ${candidate.title}`,
-    `Label: ${classification.label}`,
-    `Score: ${classification.score.toFixed(2)}`,
-    `Matched: ${matchedKeywords.join(", ") || "none"}`,
-    "Rewrite status: not implemented yet"
+    "Original:",
+    candidate.title,
+    `Clickbait score: ${classification.score.toFixed(2)}`,
+    "Rewrite:",
+    "Not available yet"
   ].join("\n");
 }
 
@@ -296,6 +304,18 @@ function createScanSignature(candidates) {
     .join("||");
 }
 
+function shouldSkipScan(signature, now) {
+  const isSameScan = signature === lastScanSignature;
+  const isWithinCooldown = now - lastScanTime < SCAN_COOLDOWN_MS;
+
+  return isSameScan || isWithinCooldown;
+}
+
+function updateScanState(signature, now) {
+  lastScanSignature = signature;
+  lastScanTime = now;
+}
+
 function logScanResult(result) {
   console.group("[Clickbait Rewriter] Headline candidate scan");
   console.log("Scanned links:", result.scanned);
@@ -312,37 +332,37 @@ function logScanResult(result) {
   console.groupEnd();
 }
 
+async function classifyAndRender(candidates) {
+  try {
+    const response = await sendCandidatesForClassification(candidates);
+
+    if (!response || response.status !== "ok") {
+      console.warn("[Clickbait Rewriter] Classification failed:", response);
+      return;
+    }
+
+    clearClassificationHighlights(candidates);
+    applyClassificationResults(candidates, response.results);
+  } catch (error) {
+    console.error("[Clickbait Rewriter] Message error:", error);
+  }
+}
+
 function runCandidateScan() {
   const now = Date.now();
   const result = collectHeadlineCandidates();
   const signature = createScanSignature(result.candidates);
 
-  const isSameScan = signature === lastScanSignature;
-  const isWithinCooldown = now - lastScanTime < SCAN_COOLDOWN_MS;
-
-  if (isSameScan || isWithinCooldown) {
+  if (shouldSkipScan(signature, now)) {
     return;
   }
 
-  lastScanSignature = signature;
-  lastScanTime = now;
+  updateScanState(signature, now);
 
-  clearScanStyles();
+  clearDebugHighlights();
   logScanResult(result);
-  applyDebugCandidates(result.candidates);
-
-  sendCandidatesForClassification(result.candidates)
-    .then((response) => {
-      if (!response || response.status !== "ok") {
-        console.warn("[Clickbait Rewriter] Classification failed:", response);
-        return;
-      }
-
-      applyClassificationResults(result.candidates, response.results);
-    })
-    .catch((error) => {
-      console.error("[Clickbait Rewriter] Message error:", error);
-    });
+  applyDebugHighlights(result.candidates);
+  classifyAndRender(result.candidates);
 }
 
 function scheduleCandidateScan() {

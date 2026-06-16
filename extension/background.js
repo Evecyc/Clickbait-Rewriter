@@ -1,23 +1,42 @@
 const API_BASE_URL = "http://127.0.0.1:8000";
+const API_TIMEOUT_MS = 60000;
 
 async function postJson(path, body) {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(body)
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
 
-  if (!response.ok) {
-    throw new Error(`${path} failed: ${response.status}`);
+  try {
+    const response = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      throw new Error(`${path} failed: ${response.status}`);
+    }
+
+    return response.json();
+  } finally {
+    clearTimeout(timeoutId);
   }
-
-  return response.json();
 }
 
 function classifyCandidates(candidates) {
   return postJson("/api/classify", { candidates });
+}
+
+function sendErrorResponse(sendResponse, error) {
+  console.error("[Clickbait Rewriter] classify API error:", error);
+
+  sendResponse({
+    status: "error",
+    results: [],
+    message: error.message
+  });
 }
 
 function handleClassifyCandidates(message, sendResponse) {
@@ -26,13 +45,7 @@ function handleClassifyCandidates(message, sendResponse) {
       sendResponse(data);
     })
     .catch((error) => {
-      console.error("[Clickbait Rewriter] classify API error:", error);
-
-      sendResponse({
-        status: "error",
-        results: [],
-        message: error.message
-      });
+      sendErrorResponse(sendResponse, error);
     });
 }
 
