@@ -7,7 +7,7 @@
   "host_permissions": [
     "https://tw.news.yahoo.com/*",
     "https://www.ettoday.net/*",
-    "https://www.nownews.com/*"
+    "https://udn.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -17,7 +17,7 @@
       "matches": [
         "https://tw.news.yahoo.com/*",
         "https://www.ettoday.net/*",
-        "https://www.nownews.com/*"
+        "https://udn.com/*"
       ],
       "js": ["content.js"],
       "css": ["style.css"],

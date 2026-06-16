@@ -1,6 +1,8 @@
-const MAX_CANDIDATES = 60;
+const MAX_TITLE_CANDIDATES = 200;
 const MIN_TITLE_LENGTH = 8;
 const MAX_TITLE_LENGTH = 60;
+const MIN_CANDIDATE_SCORE = 2;
+
 const SCAN_DELAY_MS = 1000;
 const SCAN_COOLDOWN_MS = 5000;
 
@@ -17,12 +19,30 @@ const BLOCKED_URL_PATTERNS = [
   "/topic/", "/topics/", "/author/", "/archive/"
 ];
 
+const CLICKBAIT_KEYWORDS = [
+  "驚", "震驚", "嚇傻", "傻眼", "曝光", "竟然",
+  "真相", "原因", "內幕", "超狂", "慘了", "爆",
+  "瘋傳", "網友", "必看", "你知道嗎", "揭密"
+];
+
 let lastScanSignature = "";
 let lastScanTime = 0;
 let scanTimer = null;
 
 function cleanText(text) {
   return text.replace(/\s+/g, " ").trim();
+}
+
+function getAnchorTitle(anchor) {
+  const directText = cleanText(anchor.textContent || "");
+  const titleElement = anchor.querySelector("h1, h2, h3, h4, .title, [class*='title']");
+  const titleText = titleElement ? cleanText(titleElement.textContent || "") : "";
+
+  if (titleText && titleText.length >= directText.length * 0.5) {
+    return titleText;
+  }
+
+  return directText;
 }
 
 function hasBlockedText(text) {
@@ -107,7 +127,7 @@ function scoreCandidate(anchor, url) {
 }
 
 function buildCandidate(anchor) {
-  const title = cleanText(anchor.textContent || "");
+  const title = getAnchorTitle(anchor);
   const url = anchor.href;
 
   if (shouldRejectCandidate(anchor, title, url)) {
@@ -116,7 +136,7 @@ function buildCandidate(anchor) {
 
   const { score, reasons } = scoreCandidate(anchor, url);
 
-  if (score < 2) {
+  if (score < MIN_CANDIDATE_SCORE) {
     return null;
   }
 
@@ -167,17 +187,100 @@ function collectHeadlineCandidates() {
   return {
     scanned: anchors.length,
     excluded,
-    candidates: candidates.slice(0, MAX_CANDIDATES)
+    candidates: candidates.slice(0, MAX_TITLE_CANDIDATES)
   };
 }
 
-function markDebugCandidates(candidates) {
+function mockClassifyTitle(title) {
+  const matchedKeywords = CLICKBAIT_KEYWORDS.filter((keyword) =>
+    title.includes(keyword)
+  );
+
+  if (matchedKeywords.length === 0) {
+    return {
+      label: "non_clickbait",
+      score: 0.18,
+      matchedKeywords
+    };
+  }
+
+  return {
+    label: "clickbait",
+    score: Math.min(0.55 + matchedKeywords.length * 0.12, 0.95),
+    matchedKeywords
+  };
+}
+
+function removeTooltip() {
+  document.querySelectorAll(".cr-tooltip").forEach((tooltip) => {
+    tooltip.remove();
+  });
+}
+
+function showTooltip(anchor) {
+  removeTooltip();
+
+  const text = anchor.dataset.crTooltip;
+  if (!text) return;
+
+  const tooltip = document.createElement("div");
+  tooltip.className = "cr-tooltip";
+  tooltip.textContent = text;
+
+  const rect = anchor.getBoundingClientRect();
+  tooltip.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  tooltip.style.left = `${rect.left + window.scrollX}px`;
+
+  document.body.appendChild(tooltip);
+}
+
+function bindTooltip(anchor) {
+  if (anchor.dataset.crTooltipBound === "true") return;
+
+  anchor.addEventListener("mouseenter", () => showTooltip(anchor));
+  anchor.addEventListener("mouseleave", removeTooltip);
+
+  anchor.dataset.crTooltipBound = "true";
+}
+
+function clearScanStyles() {
   document.querySelectorAll(".cr-debug-candidate").forEach((element) => {
     element.classList.remove("cr-debug-candidate");
   });
 
+  document.querySelectorAll(".cr-clickbait-highlight").forEach((element) => {
+    element.classList.remove("cr-clickbait-highlight");
+    delete element.dataset.crTooltip;
+  });
+
+  removeTooltip();
+}
+
+function applyDebugCandidates(candidates) {
   candidates.forEach((candidate) => {
     candidate.element.classList.add("cr-debug-candidate");
+  });
+}
+
+function applyMockClassification(candidates) {
+  candidates.forEach((candidate) => {
+    const result = mockClassifyTitle(candidate.title);
+
+    if (result.label !== "clickbait") {
+      return;
+    }
+
+    const tooltipText = [
+      `Original: ${candidate.title}`,
+      `Mock label: ${result.label}`,
+      `Mock score: ${result.score.toFixed(2)}`,
+      `Matched: ${result.matchedKeywords.join(", ") || "none"}`,
+      "Rewrite status: not implemented yet"
+    ].join("\n");
+
+    candidate.element.classList.add("cr-clickbait-highlight");
+    candidate.element.dataset.crTooltip = tooltipText;
+    bindTooltip(candidate.element);
   });
 }
 
@@ -219,8 +322,10 @@ function runCandidateScan() {
   lastScanSignature = signature;
   lastScanTime = now;
 
+  clearScanStyles();
   logScanResult(result);
-  markDebugCandidates(result.candidates);
+  applyDebugCandidates(result.candidates);
+  applyMockClassification(result.candidates);
 }
 
 function scheduleCandidateScan() {
@@ -228,16 +333,12 @@ function scheduleCandidateScan() {
     clearTimeout(scanTimer);
   }
 
-  scanTimer = setTimeout(() => {
-    runCandidateScan();
-  }, SCAN_DELAY_MS);
+  scanTimer = setTimeout(runCandidateScan, SCAN_DELAY_MS);
 }
 
 runCandidateScan();
 
-const observer = new MutationObserver(() => {
-  scheduleCandidateScan();
-});
+const observer = new MutationObserver(scheduleCandidateScan);
 
 observer.observe(document.body, {
   childList: true,
