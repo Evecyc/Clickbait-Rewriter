@@ -244,20 +244,20 @@ function getStatus(candidate) {
 }
 
 function buildTooltip(candidate) {
-  const lines = [
-    "Status:",
-    getStatus(candidate)
-  ];
-
   if (candidate.rewriteStatus === "success" && candidate.rewrite?.rewrittenTitle) {
-    lines.push(
+    return [
+      "Original:",
+      candidate.title,
       "",
       "Rewritten:",
       candidate.rewrite.rewrittenTitle
-    );
+    ].join("\n");
   }
 
-  return lines.join("\n");
+  return [
+    "Status:",
+    getStatus(candidate)
+  ].join("\n");
 }
 
 function updateTooltip(candidate) {
