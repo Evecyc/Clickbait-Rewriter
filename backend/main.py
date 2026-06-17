@@ -7,8 +7,12 @@ from schemas import (
     ClassifyResponse,
     ClassifiedHeadline,
     ClassificationResult,
+    ExtractRequest,
+    ExtractResponse,
+    ExtractedArticle,
 )
 from services.classifier import classify_candidates
+from services.article_extractor import extract_article
 
 app = FastAPI(title="Clickbait Rewriter API")
 
@@ -35,6 +39,13 @@ def build_classify_response(raw_results: list[dict]) -> ClassifyResponse:
     return ClassifyResponse(status="ok", results=results)
 
 
+def build_extract_response(raw_article: dict) -> ExtractResponse:
+    return ExtractResponse(
+        status="ok",
+        article=ExtractedArticle(**raw_article),
+    )
+
+
 @app.get("/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
     return HealthResponse(
@@ -47,3 +58,9 @@ def health_check() -> HealthResponse:
 def classify_headlines(request: ClassifyRequest) -> ClassifyResponse:
     raw_results = classify_candidates(request.candidates)
     return build_classify_response(raw_results)
+
+
+@app.post("/api/extract", response_model=ExtractResponse)
+def extract_article_content(request: ExtractRequest) -> ExtractResponse:
+    raw_article = extract_article(request.url)
+    return build_extract_response(raw_article)

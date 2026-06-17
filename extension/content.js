@@ -6,6 +6,7 @@ const MIN_CANDIDATE_SCORE = 2;
 
 const SCAN_DELAY_MS = 1000;
 const SCAN_COOLDOWN_MS = 5000;
+const MAX_AUTO_ARTICLE_EXTRACTIONS = 6;
 
 const BLOCKED_TEXT_KEYWORDS = [
   "廣告", "AD", "Ad", "贊助", "工商",
@@ -24,6 +25,7 @@ const BLOCKED_URL_PATTERNS = [
 let lastScanSignature = "";
 let lastScanTime = 0;
 let scanTimer = null;
+let activeTooltipAnchor = null;
 
 // Text and URL helpers
 function cleanText(text) {
@@ -202,10 +204,17 @@ function removeTooltip() {
   document.querySelectorAll(".cr-tooltip").forEach((tooltip) => {
     tooltip.remove();
   });
+
+  activeTooltipAnchor = null;
 }
 
 function showTooltip(anchor) {
   removeTooltip();
+
+  const candidate = anchor.__crCandidate;
+  if (candidate) {
+    extractArticleOnHover(candidate);
+  }
 
   const text = anchor.dataset.crTooltip;
   if (!text) return;
@@ -219,9 +228,21 @@ function showTooltip(anchor) {
   tooltip.style.left = `${rect.left + window.scrollX}px`;
 
   document.body.appendChild(tooltip);
+  activeTooltipAnchor = anchor;
 }
 
-function bindTooltip(anchor) {
+function refreshActiveTooltip(anchor) {
+  if (activeTooltipAnchor !== anchor) return;
+
+  const tooltip = document.querySelector(".cr-tooltip");
+  if (!tooltip) return;
+
+  tooltip.textContent = anchor.dataset.crTooltip || "";
+}
+
+function bindTooltip(anchor, candidate = null) {
+  anchor.__crCandidate = candidate;
+
   if (anchor.dataset.crTooltipBound === "true") return;
 
   anchor.addEventListener("mouseenter", () => showTooltip(anchor));
@@ -241,6 +262,7 @@ function clearClassificationHighlights(candidates) {
   candidates.forEach((candidate) => {
     candidate.element.classList.remove("cr-clickbait-highlight");
     delete candidate.element.dataset.crTooltip;
+    candidate.element.__crCandidate = null;
   });
 
   removeTooltip();
@@ -252,20 +274,48 @@ function applyDebugHighlights(candidates) {
   });
 }
 
-function buildClassificationTooltip(candidate, classification) {
+function getArticleStatus(candidate) {
+  if (candidate.articleStatus === "extracting") {
+    return "Extracting...";
+  }
+
+  if (candidate.articleStatus === "success" && candidate.article) {
+    return `Extracted, ${candidate.article.textLength} chars (${candidate.article.method})`;
+  }
+
+  if (candidate.articleStatus === "failed") {
+    return "Extraction failed";
+  }
+
+  return "Hover to extract";
+}
+
+function buildTooltip(candidate) {
   return [
     "Original:",
     candidate.title,
-    `Clickbait score: ${classification.score.toFixed(2)}`,
+    "",
+    `Clickbait score: ${candidate.classification.score.toFixed(2)}`,
+    "",
+    "Article:",
+    getArticleStatus(candidate),
+    "",
     "Rewrite:",
     "Not available yet"
   ].join("\n");
+}
+
+function updateCandidateTooltip(candidate) {
+  candidate.element.dataset.crTooltip = buildTooltip(candidate);
+  refreshActiveTooltip(candidate.element);
 }
 
 function applyClassificationResults(candidates, results) {
   const candidateById = new Map(
     candidates.map((candidate) => [candidate.id, candidate])
   );
+
+  const clickbaitCandidates = [];
 
   results.forEach((result) => {
     const candidate = candidateById.get(result.id);
@@ -274,10 +324,18 @@ function applyClassificationResults(candidates, results) {
     const classification = result.classification;
     if (classification.label !== "clickbait") return;
 
+    candidate.classification = classification;
+    candidate.articleStatus = "idle";
+    candidate.article = null;
+
     candidate.element.classList.add("cr-clickbait-highlight");
-    candidate.element.dataset.crTooltip = buildClassificationTooltip(candidate, classification);
-    bindTooltip(candidate.element);
+    updateCandidateTooltip(candidate);
+    bindTooltip(candidate.element, candidate);
+
+    clickbaitCandidates.push(candidate);
   });
+
+  return clickbaitCandidates;
 }
 
 // Background communication
@@ -294,6 +352,62 @@ function sendCandidatesForClassification(candidates) {
     action: "classifyCandidates",
     candidates: payload
   });
+}
+
+function sendArticleForExtraction(url) {
+  return chrome.runtime.sendMessage({
+    action: "extractArticle",
+    url
+  });
+}
+
+// Article extraction
+async function extractArticleAndUpdateTooltip(candidate) {
+  if (candidate.articleStatus === "extracting" || candidate.articleStatus === "success") {
+    return;
+  }
+
+  candidate.articleStatus = "extracting";
+  updateCandidateTooltip(candidate);
+
+  try {
+    const response = await sendArticleForExtraction(candidate.url);
+
+    if (!response || response.status !== "ok" || !response.article || !response.article.success) {
+      candidate.articleStatus = "failed";
+      candidate.article = null;
+      updateCandidateTooltip(candidate);
+      return;
+    }
+
+    candidate.articleStatus = "success";
+    candidate.article = response.article;
+    updateCandidateTooltip(candidate);
+  } catch (error) {
+    console.error("[Clickbait Rewriter] Article extraction error:", error);
+
+    candidate.articleStatus = "failed";
+    candidate.article = null;
+    updateCandidateTooltip(candidate);
+  }
+}
+
+function extractArticleOnHover(candidate) {
+  if (candidate.articleStatus !== "idle" && candidate.articleStatus !== "failed") {
+    return;
+  }
+
+  extractArticleAndUpdateTooltip(candidate);
+}
+
+async function extractTopScoredClickbaitArticles(clickbaitCandidates) {
+  const targets = [...clickbaitCandidates]
+    .sort((a, b) => b.classification.score - a.classification.score)
+    .slice(0, MAX_AUTO_ARTICLE_EXTRACTIONS);
+
+  for (const candidate of targets) {
+    await extractArticleAndUpdateTooltip(candidate);
+  }
 }
 
 // Scan control
@@ -342,7 +456,8 @@ async function classifyAndRender(candidates) {
     }
 
     clearClassificationHighlights(candidates);
-    applyClassificationResults(candidates, response.results);
+    const clickbaitCandidates = applyClassificationResults(candidates, response.results);
+    extractTopScoredClickbaitArticles(clickbaitCandidates);
   } catch (error) {
     console.error("[Clickbait Rewriter] Message error:", error);
   }

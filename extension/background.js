@@ -29,12 +29,15 @@ function classifyCandidates(candidates) {
   return postJson("/api/classify", { candidates });
 }
 
-function sendErrorResponse(sendResponse, error) {
-  console.error("[Clickbait Rewriter] classify API error:", error);
+function extractArticle(url) {
+  return postJson("/api/extract", { url });
+}
+
+function sendErrorResponse(sendResponse, source, error) {
+  console.error(`[Clickbait Rewriter] ${source} API error:`, error);
 
   sendResponse({
     status: "error",
-    results: [],
     message: error.message
   });
 }
@@ -45,13 +48,28 @@ function handleClassifyCandidates(message, sendResponse) {
       sendResponse(data);
     })
     .catch((error) => {
-      sendErrorResponse(sendResponse, error);
+      sendErrorResponse(sendResponse, "classify", error);
+    });
+}
+
+function handleExtractArticle(message, sendResponse) {
+  extractArticle(message.url)
+    .then((data) => {
+      sendResponse(data);
+    })
+    .catch((error) => {
+      sendErrorResponse(sendResponse, "extract", error);
     });
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "classifyCandidates") {
     handleClassifyCandidates(message, sendResponse);
+    return true;
+  }
+
+  if (message.action === "extractArticle") {
+    handleExtractArticle(message, sendResponse);
     return true;
   }
 
