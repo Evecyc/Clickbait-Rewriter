@@ -10,9 +10,13 @@ from schemas import (
     ExtractRequest,
     ExtractResponse,
     ExtractedArticle,
+    RewriteRequest,
+    RewriteResponse,
+    RewriteResult,
 )
 from services.classifier import classify_candidates
 from services.article_extractor import extract_article
+from services.rewriter import rewrite_title
 
 app = FastAPI(title="Clickbait Rewriter API")
 
@@ -45,6 +49,11 @@ def build_extract_response(raw_article: dict) -> ExtractResponse:
         article=ExtractedArticle(**raw_article),
     )
 
+def build_rewrite_response(raw_rewrite: dict) -> RewriteResponse:
+    return RewriteResponse(
+        status="ok",
+        rewrite=RewriteResult(**raw_rewrite),
+    )
 
 @app.get("/health", response_model=HealthResponse)
 def health_check() -> HealthResponse:
@@ -64,3 +73,11 @@ def classify_headlines(request: ClassifyRequest) -> ClassifyResponse:
 def extract_article_content(request: ExtractRequest) -> ExtractResponse:
     raw_article = extract_article(request.url)
     return build_extract_response(raw_article)
+
+@app.post("/api/rewrite", response_model=RewriteResponse)
+def rewrite_headline(request: RewriteRequest) -> RewriteResponse:
+    raw_rewrite = rewrite_title(
+        original_title=request.originalTitle,
+        article_text=request.articleText,
+    )
+    return build_rewrite_response(raw_rewrite)
