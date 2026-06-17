@@ -37,3 +37,22 @@ class ClassifyRequest(BaseModel):
 class ClassifyResponse(BaseModel):
     status: str
     results: list[ClassifiedHeadline]
+
+
+class ExtractRequest(BaseModel):
+    url: str
+
+
+class ExtractedArticle(BaseModel):
+    url: str
+    success: bool
+    title: str
+    text: str
+    textLength: int
+    method: str
+    error: str | None = None
+
+
+class ExtractResponse(BaseModel):
+    status: str
+    article: ExtractedArticle
