@@ -56,3 +56,20 @@ class ExtractedArticle(BaseModel):
 class ExtractResponse(BaseModel):
     status: str
     article: ExtractedArticle
+
+
+class RewriteRequest(BaseModel):
+    originalTitle: str
+    articleText: str
+
+
+class RewriteResult(BaseModel):
+    originalTitle: str
+    rewrittenTitle: str
+    mode: str
+    error: str | None = None
+
+
+class RewriteResponse(BaseModel):
+    status: str
+    rewrite: RewriteResult

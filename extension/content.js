@@ -1,4 +1,5 @@
-// Config
+const DEBUG_MODE = false;
+
 const MAX_TITLE_CANDIDATES = 100;
 const MIN_TITLE_LENGTH = 8;
 const MAX_TITLE_LENGTH = 60;
@@ -27,41 +28,15 @@ let lastScanTime = 0;
 let scanTimer = null;
 let activeTooltipAnchor = null;
 
-// Text and URL helpers
 function cleanText(text) {
-  return text.replace(/\s+/g, " ").trim();
+  return (text || "").replace(/\s+/g, " ").trim();
 }
 
 function getCandidateId(title, url) {
   return `${title}::${url}`;
 }
 
-function getAnchorTitle(anchor) {
-  const directText = cleanText(anchor.textContent || "");
-  const titleElement = anchor.querySelector("h1, h2, h3, h4, .title, [class*='title']");
-  const titleText = titleElement ? cleanText(titleElement.textContent || "") : "";
-
-  if (titleText && titleText.length >= directText.length * 0.5) {
-    return titleText;
-  }
-
-  return directText;
-}
-
-function hasBlockedText(text) {
-  return BLOCKED_TEXT_KEYWORDS.some((keyword) => text.includes(keyword));
-}
-
-function hasBlockedUrl(url) {
-  return BLOCKED_URL_PATTERNS.some((pattern) => url.includes(pattern));
-}
-
-function isValidTitleLength(title) {
-  return title.length >= MIN_TITLE_LENGTH && title.length <= MAX_TITLE_LENGTH;
-}
-
-// Candidate extraction
-function isVisibleElement(element) {
+function isVisible(element) {
   const rect = element.getBoundingClientRect();
   const style = window.getComputedStyle(element);
 
@@ -74,24 +49,32 @@ function isVisibleElement(element) {
   );
 }
 
+function hasBlockedText(text) {
+  return BLOCKED_TEXT_KEYWORDS.some((keyword) => text.includes(keyword));
+}
+
+function hasBlockedUrl(url) {
+  return BLOCKED_URL_PATTERNS.some((pattern) => url.includes(pattern));
+}
+
 function hasNearbyAdLabel(anchor) {
   const container = anchor.closest("li, article, section, div");
   if (!container) return false;
 
-  const text = cleanText(container.textContent || "");
+  const text = cleanText(container.textContent);
   return ["Ad", "廣告", "贊助", "工商"].some((keyword) => text.includes(keyword));
 }
 
-function shouldRejectCandidate(anchor, title, url) {
-  if (!title || !url) return true;
-  if (!isVisibleElement(anchor)) return true;
-  if (!isValidTitleLength(title)) return true;
-  if (hasBlockedText(title)) return true;
-  if (hasBlockedUrl(url)) return true;
-  if (anchor.closest("nav, header, footer")) return true;
-  if (hasNearbyAdLabel(anchor)) return true;
+function getAnchorTitle(anchor) {
+  const directText = cleanText(anchor.textContent);
+  const titleElement = anchor.querySelector("h1, h2, h3, h4, .title, [class*='title']");
+  const titleText = titleElement ? cleanText(titleElement.textContent) : "";
 
-  return false;
+  if (titleText && titleText.length >= directText.length * 0.5) {
+    return titleText;
+  }
+
+  return directText;
 }
 
 function getElementContext(element) {
@@ -141,17 +124,17 @@ function scoreCandidate(anchor, url) {
 
 function buildCandidate(anchor) {
   const title = getAnchorTitle(anchor);
-  const url = anchor.href;
+  const url = anchor.href || "";
 
-  if (shouldRejectCandidate(anchor, title, url)) {
-    return null;
-  }
+  if (!title || !url) return null;
+  if (!isVisible(anchor)) return null;
+  if (title.length < MIN_TITLE_LENGTH || title.length > MAX_TITLE_LENGTH) return null;
+  if (hasBlockedText(title) || hasBlockedUrl(url)) return null;
+  if (anchor.closest("nav, header, footer")) return null;
+  if (hasNearbyAdLabel(anchor)) return null;
 
   const { score, reasons } = scoreCandidate(anchor, url);
-
-  if (score < MIN_CANDIDATE_SCORE) {
-    return null;
-  }
+  if (score < MIN_CANDIDATE_SCORE) return null;
 
   return {
     id: getCandidateId(title, url),
@@ -176,52 +159,124 @@ function collectHeadlineCandidates() {
   const anchors = Array.from(document.querySelectorAll(selectors.join(",")));
   const seen = new Set();
   const candidates = [];
-  let excluded = 0;
 
   for (const anchor of anchors) {
     const candidate = buildCandidate(anchor);
-
-    if (!candidate || seen.has(candidate.id)) {
-      excluded += 1;
-      continue;
-    }
+    if (!candidate || seen.has(candidate.id)) continue;
 
     seen.add(candidate.id);
     candidates.push(candidate);
   }
 
   candidates.sort((a, b) => b.score - a.score);
-
-  return {
-    scanned: anchors.length,
-    excluded,
-    candidates: candidates.slice(0, MAX_TITLE_CANDIDATES)
-  };
+  return candidates.slice(0, MAX_TITLE_CANDIDATES);
 }
 
-// Tooltip UI
-function removeTooltip() {
-  document.querySelectorAll(".cr-tooltip").forEach((tooltip) => {
-    tooltip.remove();
-  });
+function sendMessage(action, payload) {
+  return chrome.runtime.sendMessage({ action, ...payload });
+}
 
+function classifyCandidates(candidates) {
+  const payload = candidates.map(({ id, title, url, score, reasons }) => ({
+    id,
+    title,
+    url,
+    candidateScore: score,
+    candidateReasons: reasons
+  }));
+
+  return sendMessage("classifyCandidates", { candidates: payload });
+}
+
+function extractArticle(url) {
+  return sendMessage("extractArticle", { url });
+}
+
+function rewriteHeadline(originalTitle, articleText) {
+  return sendMessage("rewriteHeadline", {
+    originalTitle,
+    articleText
+  });
+}
+
+function removeTooltip() {
+  document.querySelectorAll(".cr-tooltip").forEach((tooltip) => tooltip.remove());
   activeTooltipAnchor = null;
+}
+
+function refreshTooltip(anchor) {
+  if (activeTooltipAnchor !== anchor) return;
+
+  const tooltip = document.querySelector(".cr-tooltip");
+  if (tooltip) {
+    tooltip.textContent = anchor.dataset.crTooltip || "";
+  }
+}
+
+function getStatus(candidate) {
+  if (candidate.articleStatus === "extracting") {
+    return "Extracting article...";
+  }
+
+  if (candidate.articleStatus === "failed") {
+    return "Article extraction failed";
+  }
+
+  if (candidate.articleStatus !== "success" || !candidate.article) {
+    return "Waiting for article extraction...";
+  }
+
+  const textLength = candidate.article.textLength;
+
+  if (candidate.rewriteStatus === "rewriting") {
+    return `Article extracted, ${textLength} chars. Rewriting...`;
+  }
+
+  if (candidate.rewriteStatus === "success") {
+    return "Rewrite completed";
+  }
+
+  if (candidate.rewriteStatus === "failed") {
+    return "Rewrite unavailable";
+  }
+
+  return `Article extracted, ${textLength} chars. Waiting to rewrite...`;
+}
+
+function buildTooltip(candidate) {
+  const lines = [
+    "Status:",
+    getStatus(candidate)
+  ];
+
+  if (candidate.rewriteStatus === "success" && candidate.rewrite?.rewrittenTitle) {
+    lines.push(
+      "",
+      "Rewritten:",
+      candidate.rewrite.rewrittenTitle
+    );
+  }
+
+  return lines.join("\n");
+}
+
+function updateTooltip(candidate) {
+  candidate.element.dataset.crTooltip = buildTooltip(candidate);
+  refreshTooltip(candidate.element);
 }
 
 function showTooltip(anchor) {
   removeTooltip();
 
   const candidate = anchor.__crCandidate;
-  if (candidate) {
-    extractArticleOnHover(candidate);
-  }
+  if (!candidate) return;
 
-  const text = anchor.dataset.crTooltip;
-  if (!text) return;
+  startArticleExtraction(candidate);
+  startRewrite(candidate);
 
   const tooltip = document.createElement("div");
   tooltip.className = "cr-tooltip";
-  tooltip.textContent = text;
+  tooltip.textContent = anchor.dataset.crTooltip || "";
 
   const rect = anchor.getBoundingClientRect();
   tooltip.style.top = `${rect.bottom + window.scrollY + 6}px`;
@@ -231,16 +286,7 @@ function showTooltip(anchor) {
   activeTooltipAnchor = anchor;
 }
 
-function refreshActiveTooltip(anchor) {
-  if (activeTooltipAnchor !== anchor) return;
-
-  const tooltip = document.querySelector(".cr-tooltip");
-  if (!tooltip) return;
-
-  tooltip.textContent = anchor.dataset.crTooltip || "";
-}
-
-function bindTooltip(anchor, candidate = null) {
+function bindTooltip(anchor, candidate) {
   anchor.__crCandidate = candidate;
 
   if (anchor.dataset.crTooltipBound === "true") return;
@@ -251,14 +297,87 @@ function bindTooltip(anchor, candidate = null) {
   anchor.dataset.crTooltipBound = "true";
 }
 
-// Page UI update
-function clearDebugHighlights() {
-  document.querySelectorAll(".cr-debug-candidate").forEach((element) => {
-    element.classList.remove("cr-debug-candidate");
-  });
+async function extractArticleAndUpdate(candidate) {
+  if (candidate.articleStatus !== "idle") return;
+
+  candidate.articleStatus = "extracting";
+  updateTooltip(candidate);
+
+  try {
+    const response = await extractArticle(candidate.url);
+
+    if (!response?.article?.success) {
+      candidate.articleStatus = "failed";
+      candidate.article = null;
+      updateTooltip(candidate);
+      return;
+    }
+
+    candidate.articleStatus = "success";
+    candidate.article = response.article;
+    updateTooltip(candidate);
+
+    if (activeTooltipAnchor === candidate.element) {
+      startRewrite(candidate);
+    }
+  } catch (error) {
+    console.error("[Clickbait Rewriter] Article extraction error:", error);
+
+    candidate.articleStatus = "failed";
+    candidate.article = null;
+    updateTooltip(candidate);
+  }
 }
 
-function clearClassificationHighlights(candidates) {
+function startArticleExtraction(candidate) {
+  extractArticleAndUpdate(candidate);
+}
+
+async function rewriteAndUpdate(candidate) {
+  if (candidate.rewriteStatus !== "idle") return;
+  if (candidate.articleStatus !== "success" || !candidate.article?.text) return;
+
+  candidate.rewriteStatus = "rewriting";
+  updateTooltip(candidate);
+
+  try {
+    const response = await rewriteHeadline(candidate.title, candidate.article.text);
+    const rewrite = response?.rewrite;
+
+    if (!rewrite?.rewrittenTitle) {
+      candidate.rewriteStatus = "failed";
+      candidate.rewrite = rewrite || null;
+      updateTooltip(candidate);
+      return;
+    }
+
+    candidate.rewriteStatus = "success";
+    candidate.rewrite = rewrite;
+    updateTooltip(candidate);
+  } catch (error) {
+    console.error("[Clickbait Rewriter] Rewrite error:", error);
+
+    candidate.rewriteStatus = "failed";
+    candidate.rewrite = null;
+    updateTooltip(candidate);
+  }
+}
+
+function startRewrite(candidate) {
+  rewriteAndUpdate(candidate);
+}
+
+async function extractTopArticles(candidates) {
+  const targets = [...candidates]
+    .sort((a, b) => b.classification.score - a.classification.score)
+    .slice(0, MAX_AUTO_ARTICLE_EXTRACTIONS);
+
+  for (const candidate of targets) {
+    await extractArticleAndUpdate(candidate);
+  }
+}
+
+function clearHighlights(candidates) {
   candidates.forEach((candidate) => {
     candidate.element.classList.remove("cr-clickbait-highlight");
     delete candidate.element.dataset.crTooltip;
@@ -268,48 +387,6 @@ function clearClassificationHighlights(candidates) {
   removeTooltip();
 }
 
-function applyDebugHighlights(candidates) {
-  candidates.forEach((candidate) => {
-    candidate.element.classList.add("cr-debug-candidate");
-  });
-}
-
-function getArticleStatus(candidate) {
-  if (candidate.articleStatus === "extracting") {
-    return "Extracting...";
-  }
-
-  if (candidate.articleStatus === "success" && candidate.article) {
-    return `Extracted, ${candidate.article.textLength} chars (${candidate.article.method})`;
-  }
-
-  if (candidate.articleStatus === "failed") {
-    return "Extraction failed";
-  }
-
-  return "Hover to extract";
-}
-
-function buildTooltip(candidate) {
-  return [
-    "Original:",
-    candidate.title,
-    "",
-    `Clickbait score: ${candidate.classification.score.toFixed(2)}`,
-    "",
-    "Article:",
-    getArticleStatus(candidate),
-    "",
-    "Rewrite:",
-    "Not available yet"
-  ].join("\n");
-}
-
-function updateCandidateTooltip(candidate) {
-  candidate.element.dataset.crTooltip = buildTooltip(candidate);
-  refreshActiveTooltip(candidate.element);
-}
-
 function applyClassificationResults(candidates, results) {
   const candidateById = new Map(
     candidates.map((candidate) => [candidate.id, candidate])
@@ -317,100 +394,26 @@ function applyClassificationResults(candidates, results) {
 
   const clickbaitCandidates = [];
 
-  results.forEach((result) => {
+  for (const result of results) {
     const candidate = candidateById.get(result.id);
-    if (!candidate) return;
+    if (!candidate || result.classification.label !== "clickbait") continue;
 
-    const classification = result.classification;
-    if (classification.label !== "clickbait") return;
-
-    candidate.classification = classification;
+    candidate.classification = result.classification;
     candidate.articleStatus = "idle";
     candidate.article = null;
+    candidate.rewriteStatus = "idle";
+    candidate.rewrite = null;
 
     candidate.element.classList.add("cr-clickbait-highlight");
-    updateCandidateTooltip(candidate);
+    updateTooltip(candidate);
     bindTooltip(candidate.element, candidate);
 
     clickbaitCandidates.push(candidate);
-  });
+  }
 
   return clickbaitCandidates;
 }
 
-// Background communication
-function sendCandidatesForClassification(candidates) {
-  const payload = candidates.map(({ id, title, url, score, reasons }) => ({
-    id,
-    title,
-    url,
-    candidateScore: score,
-    candidateReasons: reasons
-  }));
-
-  return chrome.runtime.sendMessage({
-    action: "classifyCandidates",
-    candidates: payload
-  });
-}
-
-function sendArticleForExtraction(url) {
-  return chrome.runtime.sendMessage({
-    action: "extractArticle",
-    url
-  });
-}
-
-// Article extraction
-async function extractArticleAndUpdateTooltip(candidate) {
-  if (candidate.articleStatus === "extracting" || candidate.articleStatus === "success") {
-    return;
-  }
-
-  candidate.articleStatus = "extracting";
-  updateCandidateTooltip(candidate);
-
-  try {
-    const response = await sendArticleForExtraction(candidate.url);
-
-    if (!response || response.status !== "ok" || !response.article || !response.article.success) {
-      candidate.articleStatus = "failed";
-      candidate.article = null;
-      updateCandidateTooltip(candidate);
-      return;
-    }
-
-    candidate.articleStatus = "success";
-    candidate.article = response.article;
-    updateCandidateTooltip(candidate);
-  } catch (error) {
-    console.error("[Clickbait Rewriter] Article extraction error:", error);
-
-    candidate.articleStatus = "failed";
-    candidate.article = null;
-    updateCandidateTooltip(candidate);
-  }
-}
-
-function extractArticleOnHover(candidate) {
-  if (candidate.articleStatus !== "idle" && candidate.articleStatus !== "failed") {
-    return;
-  }
-
-  extractArticleAndUpdateTooltip(candidate);
-}
-
-async function extractTopScoredClickbaitArticles(clickbaitCandidates) {
-  const targets = [...clickbaitCandidates]
-    .sort((a, b) => b.classification.score - a.classification.score)
-    .slice(0, MAX_AUTO_ARTICLE_EXTRACTIONS);
-
-  for (const candidate of targets) {
-    await extractArticleAndUpdateTooltip(candidate);
-  }
-}
-
-// Scan control
 function createScanSignature(candidates) {
   return candidates
     .map((candidate) => `${candidate.title}|${candidate.url}`)
@@ -419,24 +422,19 @@ function createScanSignature(candidates) {
 }
 
 function shouldSkipScan(signature, now) {
-  const isSameScan = signature === lastScanSignature;
-  const isWithinCooldown = now - lastScanTime < SCAN_COOLDOWN_MS;
-
-  return isSameScan || isWithinCooldown;
+  return (
+    signature === lastScanSignature ||
+    now - lastScanTime < SCAN_COOLDOWN_MS
+  );
 }
 
-function updateScanState(signature, now) {
-  lastScanSignature = signature;
-  lastScanTime = now;
-}
+function logScan(candidates) {
+  if (!DEBUG_MODE) return;
 
-function logScanResult(result) {
-  console.group("[Clickbait Rewriter] Headline candidate scan");
-  console.log("Scanned links:", result.scanned);
-  console.log("Candidate headlines:", result.candidates.length);
-  console.log("Excluded links:", result.excluded);
+  console.group("[Clickbait Rewriter] Headline scan");
+  console.log("Candidates:", candidates.length);
   console.table(
-    result.candidates.map(({ title, url, score, reasons }) => ({
+    candidates.map(({ title, score, reasons, url }) => ({
       title,
       score,
       reasons: reasons.join(", "),
@@ -448,43 +446,37 @@ function logScanResult(result) {
 
 async function classifyAndRender(candidates) {
   try {
-    const response = await sendCandidatesForClassification(candidates);
+    const response = await classifyCandidates(candidates);
 
-    if (!response || response.status !== "ok") {
+    if (response?.status !== "ok") {
       console.warn("[Clickbait Rewriter] Classification failed:", response);
       return;
     }
 
-    clearClassificationHighlights(candidates);
+    clearHighlights(candidates);
     const clickbaitCandidates = applyClassificationResults(candidates, response.results);
-    extractTopScoredClickbaitArticles(clickbaitCandidates);
+    extractTopArticles(clickbaitCandidates);
   } catch (error) {
-    console.error("[Clickbait Rewriter] Message error:", error);
+    console.error("[Clickbait Rewriter] Classification error:", error);
   }
 }
 
 function runCandidateScan() {
   const now = Date.now();
-  const result = collectHeadlineCandidates();
-  const signature = createScanSignature(result.candidates);
+  const candidates = collectHeadlineCandidates();
+  const signature = createScanSignature(candidates);
 
-  if (shouldSkipScan(signature, now)) {
-    return;
-  }
+  if (shouldSkipScan(signature, now)) return;
 
-  updateScanState(signature, now);
+  lastScanSignature = signature;
+  lastScanTime = now;
 
-  clearDebugHighlights();
-  logScanResult(result);
-  applyDebugHighlights(result.candidates);
-  classifyAndRender(result.candidates);
+  logScan(candidates);
+  classifyAndRender(candidates);
 }
 
 function scheduleCandidateScan() {
-  if (scanTimer) {
-    clearTimeout(scanTimer);
-  }
-
+  clearTimeout(scanTimer);
   scanTimer = setTimeout(runCandidateScan, SCAN_DELAY_MS);
 }
 

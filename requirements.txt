@@ -13,3 +13,6 @@ readability-lxml
 # ML classifier
 transformers
 torch
+
+# LLM rewriting
+google-genai

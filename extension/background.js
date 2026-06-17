@@ -33,6 +33,13 @@ function extractArticle(url) {
   return postJson("/api/extract", { url });
 }
 
+function rewriteHeadline(originalTitle, articleText) {
+  return postJson("/api/rewrite", {
+    originalTitle,
+    articleText
+  });
+}
+
 function sendErrorResponse(sendResponse, source, error) {
   console.error(`[Clickbait Rewriter] ${source} API error:`, error);
 
@@ -62,6 +69,16 @@ function handleExtractArticle(message, sendResponse) {
     });
 }
 
+function handleRewriteHeadline(message, sendResponse) {
+  rewriteHeadline(message.originalTitle, message.articleText)
+    .then((data) => {
+      sendResponse(data);
+    })
+    .catch((error) => {
+      sendErrorResponse(sendResponse, "rewrite", error);
+    });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === "classifyCandidates") {
     handleClassifyCandidates(message, sendResponse);
@@ -70,6 +87,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === "extractArticle") {
     handleExtractArticle(message, sendResponse);
+    return true;
+  }
+
+  if (message.action === "rewriteHeadline") {
+    handleRewriteHeadline(message, sendResponse);
     return true;
   }
 
