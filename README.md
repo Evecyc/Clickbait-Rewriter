@@ -1,6 +1,6 @@
 # Clickbait Rewriter
 
-Clickbait Rewriter is a Chrome Extension with a FastAPI backend that detects clickbait-style headlines on Taiwanese news websites, extracts the corresponding article content, and rewrites the headline into a clearer and more informative version using Gemini.
+Clickbait Rewriter is a Chrome Extension with a FastAPI backend that detects clickbait-style headlines on Taiwanese news websites, extracts article content, and rewrites the headline into a clearer and more informative version using Gemini.
 
 ## 1. Overview
 
@@ -20,7 +20,23 @@ News website
 
 Rewriting is triggered on hover to reduce unnecessary Gemini API calls and avoid rewriting headlines the user never interacts with.
 
-## 2. Features
+## 2. Demo
+
+### End-to-end workflow on Yahoo News Taiwan
+
+![Yahoo demo](assets/demo_yahoo.gif)
+
+### Cross-site examples
+
+ETtoday rewrite result:
+
+![ETtoday rewrite result](assets/ettoday_rewrite.png)
+
+UDN headline highlighting:
+
+![UDN highlight](assets/udn_highlight.png)
+
+## 3. Features
 
 ### Browser Extension
 
@@ -36,13 +52,13 @@ Rewriting is triggered on hover to reduce unnecessary Gemini API calls and avoid
 - Rewrites headlines with Gemini using article context
 - Returns clear failure states when article extraction or rewriting is unavailable
 
-## 3. Supported Websites
+## 4. Supported Websites
 
 - Yahoo News Taiwan
 - ETtoday
 - UDN
 
-## 4. Tech Stack
+## 5. Tech Stack
 
 ### Frontend
 
@@ -61,10 +77,14 @@ Rewriting is triggered on hover to reduce unnecessary Gemini API calls and avoid
 - Hugging Face Transformers
 - Google Gemini API
 
-## 5. Project Structure
+## 6. Project Structure
 
 ```text
 clickbait-rewriter/
+├── assets/
+│   ├── demo_yahoo.gif
+│   ├── ettoday_rewrite_result.png
+│   └── udn_highlight.png
 ├── extension/
 │   ├── manifest.json
 │   ├── content.js
@@ -84,9 +104,9 @@ clickbait-rewriter/
 └── README.md
 ```
 
-## 6. Setup
+## 7. Setup
 
-### 6.1 Install Dependencies
+### 7.1 Install Dependencies
 
 ```bash
 python -m venv .venv
@@ -94,7 +114,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 6.2 Configure Environment Variables
+### 7.2 Configure Environment Variables
 
 Create a local `.env` file:
 
@@ -116,9 +136,9 @@ MAX_CANDIDATES=100
 MAX_REWRITES=5
 ```
 
-## 7. Running the Project
+## 8. Running the Project
 
-### 7.1 Start the Backend
+### 8.1 Start the Backend
 
 ```bash
 cd backend
@@ -132,7 +152,7 @@ http://127.0.0.1:8000/health
 http://127.0.0.1:8000/docs
 ```
 
-### 7.2 Load the Chrome Extension
+### 8.2 Load the Chrome Extension
 
 1. Open `chrome://extensions/`
 2. Enable **Developer mode**
@@ -140,7 +160,7 @@ http://127.0.0.1:8000/docs
 4. Select the `extension/` folder
 5. Open a supported news website
 
-## 8. Usage
+## 9. Usage
 
 When a supported news page is opened, suspicious headlines are highlighted in yellow.
 
@@ -170,27 +190,27 @@ Rewritten:
 
 If extraction or rewriting fails, the tooltip displays a clear failure status instead of showing an unreliable fallback rewrite.
 
-## 9. API Endpoints
+## 10. API Endpoints
 
-### 9.1 Health Check
+### 10.1 Health Check
 
 ```http
 GET /health
 ```
 
-### 9.2 Classify Headlines
+### 10.2 Classify Headlines
 
 ```http
 POST /api/classify
 ```
 
-### 9.3 Extract Article
+### 10.3 Extract Article
 
 ```http
 POST /api/extract
 ```
 
-### 9.4 Rewrite Headline
+### 10.4 Rewrite Headline
 
 ```http
 POST /api/rewrite
@@ -233,7 +253,7 @@ If Gemini is unavailable or quota is exceeded:
 }
 ```
 
-## 10. Limitations
+## 11. Limitations
 
 ### External Dependencies
 
@@ -250,7 +270,7 @@ If Gemini is unavailable or quota is exceeded:
 - Gemini rewriting may take several seconds because the model receives article context.
 - Rewriting is triggered on hover to reduce API usage and latency for headlines the user does not inspect.
 
-## 11. Current Status
+## 12. Current Status
 
 Completed MVP:
 
