@@ -26,3 +26,4 @@ dist/
 # Editor
 .vscode/
 .idea/
+.Rhistory

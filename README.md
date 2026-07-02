@@ -1,14 +1,12 @@
 # Clickbait Rewriter
 
-Clickbait Rewriter is a Chrome Extension with a FastAPI backend that detects clickbait-style headlines on Taiwanese news websites, extracts article content, and rewrites the headline into a clearer and more informative version using Gemini.
-
-## 1. Overview
+## Overview
 
 Many news websites use headlines that hide key information, exaggerate emotion, or encourage users to click before understanding the main point. This project reduces that information gap by rewriting suspicious headlines with article-level context.
 
 The system runs locally:
 
-```text
+``` text
 News website
 → Chrome Extension
 → FastAPI backend
@@ -18,72 +16,75 @@ News website
 → tooltip display
 ```
 
-Rewriting is triggered on hover to reduce unnecessary Gemini API calls and avoid rewriting headlines the user never interacts with.
+This version is a personal rebuild and extension of a junior-year undergraduate research project originally developed with teammates and supported by Taiwan's NSTC Undergraduate Research Project grant.
 
-## 2. Demo
+## Demo
 
 ### End-to-end workflow on Yahoo News Taiwan
 
 ![Yahoo demo](assets/demo_yahoo.gif)
 
-### Cross-site examples
-
-ETtoday rewrite result:
-
-![ETtoday rewrite result](assets/ettoday_rewrite.png)
-
-UDN headline highlighting:
+### UDN headline highlighting
 
 ![UDN highlight](assets/udn_highlight.png)
 
-## 3. Features
+### ETtoday rewrite result
 
-### Browser Extension
+![ETtoday rewrite result](assets/ettoday_rewrite.png)
 
-- Detects headline candidates on supported news websites
-- Highlights clickbait-style headlines directly on the page
-- Shows live processing status in a tooltip
-- Displays the full original headline and rewritten headline after processing
+## Architecture
 
-### Backend Pipeline
+``` mermaid
+flowchart TD
+    A[Supported News Website] --> B[Chrome Extension]
+    B --> C[Headline Candidate Extraction]
+    C --> D[FastAPI Backend]
 
-- Classifies headlines with a transformer-based clickbait classifier
-- Extracts article content from the original news page
-- Rewrites headlines with Gemini using article context
-- Returns clear failure states when article extraction or rewriting is unavailable
+    D --> E[Clickbait Classifier]
+    E --> F[Yellow Highlight]
+    F --> B
 
-## 4. Supported Websites
+    B -- User hovers highlighted headline --> D
+    D --> G[Article Extractor]
+    G --> H[Gemini Rewriter]
+    H --> I[Tooltip: Original + Rewritten]
+    I --> B
+```
 
-- Yahoo News Taiwan
-- ETtoday
-- UDN
+## Features
 
-## 5. Tech Stack
+-   Support Yahoo News Taiwan, ETtoday, and UDN
+-   Detects and highlights clickbait-style headlines on supported news websites
+-   Extracts article content from the original news page
+-   Rewrites headlines with Gemini using article-level context
+-   Shows live processing status and rewritten results in a tooltip
+
+## Tech Stack
 
 ### Frontend
 
-- Chrome Extension Manifest V3
-- JavaScript
-- CSS
+-   Chrome Extension Manifest V3
+-   JavaScript
+-   CSS
 
 ### Backend
 
-- Python
-- FastAPI
-- Pydantic
-- Trafilatura
-- Readability
-- BeautifulSoup
-- Hugging Face Transformers
-- Google Gemini API
+-   Python
+-   FastAPI
+-   Pydantic
+-   Trafilatura
+-   Readability
+-   BeautifulSoup
+-   Hugging Face Transformers
+-   Google Gemini API
 
-## 6. Project Structure
+## Project Structure
 
-```text
+``` text
 clickbait-rewriter/
 ├── assets/
 │   ├── demo_yahoo.gif
-│   ├── ettoday_rewrite_result.png
+│   ├── ettoday_rewrite.png
 │   └── udn_highlight.png
 ├── extension/
 │   ├── manifest.json
@@ -104,27 +105,27 @@ clickbait-rewriter/
 └── README.md
 ```
 
-## 7. Setup
+## Running the Project
 
-### 7.1 Install Dependencies
+### Install Dependencies
 
-```bash
+``` bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 7.2 Configure Environment Variables
+### Configure Environment Variables
 
 Create a local `.env` file:
 
-```bash
+``` bash
 cp .env.example .env
 ```
 
 Fill in the required values:
 
-```env
+``` env
 CLASSIFIER_MODE=model
 CLASSIFIER_MODEL_NAME=Stremie/xlm-roberta-base-clickbait
 
@@ -136,31 +137,29 @@ MAX_CANDIDATES=100
 MAX_REWRITES=5
 ```
 
-## 8. Running the Project
+### Start the Backend
 
-### 8.1 Start the Backend
-
-```bash
+``` bash
 cd backend
 uvicorn main:app --reload
 ```
 
 Backend URLs:
 
-```text
+``` text
 http://127.0.0.1:8000/health
 http://127.0.0.1:8000/docs
 ```
 
-### 8.2 Load the Chrome Extension
+### Load the Chrome Extension
 
-1. Open `chrome://extensions/`
-2. Enable **Developer mode**
-3. Click **Load unpacked**
-4. Select the `extension/` folder
-5. Open a supported news website
+1.  Open `chrome://extensions/`
+2.  Enable **Developer mode**
+3.  Click **Load unpacked**
+4.  Select the `extension/` folder
+5.  Open a supported news website
 
-## 9. Usage
+## Usage
 
 When a supported news page is opened, suspicious headlines are highlighted in yellow.
 
@@ -170,17 +169,24 @@ Hovering over a highlighted headline triggers article extraction and headline re
 
 The tooltip shows live status updates:
 
-```text
+``` text
 Extracting article...
 Article extracted, xxxx chars. Rewriting...
 Rewrite completed
+```
+
+If the pipeline fails, the tooltip shows a failure state:
+
+``` text
+Article extraction failed
+Rewrite unavailable
 ```
 
 ### Rewrite Result
 
 After rewriting succeeds, the tooltip shows:
 
-```text
+``` text
 Original:
 <full original headline>
 
@@ -188,97 +194,26 @@ Rewritten:
 <rewritten headline>
 ```
 
-If extraction or rewriting fails, the tooltip displays a clear failure status instead of showing an unreliable fallback rewrite.
+## API Overview
 
-## 10. API Endpoints
+The FastAPI backend exposes four main endpoints:
 
-### 10.1 Health Check
-
-```http
-GET /health
+``` text
+GET  /health        # Check backend status
+POST /api/classify  # Classify headline candidates
+POST /api/extract   # Extract article content
+POST /api/rewrite   # Rewrite headline with article context
 ```
 
-### 10.2 Classify Headlines
+Interactive API documentation is available at:
 
-```http
-POST /api/classify
+``` text
+http://127.0.0.1:8000/docs
 ```
 
-### 10.3 Extract Article
+## Limitations
 
-```http
-POST /api/extract
-```
-
-### 10.4 Rewrite Headline
-
-```http
-POST /api/rewrite
-```
-
-Request body:
-
-```json
-{
-  "originalTitle": "Original clickbait headline",
-  "articleText": "Extracted article text"
-}
-```
-
-Successful response:
-
-```json
-{
-  "status": "ok",
-  "rewrite": {
-    "originalTitle": "Original clickbait headline",
-    "rewrittenTitle": "Neutral rewritten headline",
-    "mode": "gemini",
-    "error": null
-  }
-}
-```
-
-If Gemini is unavailable or quota is exceeded:
-
-```json
-{
-  "status": "ok",
-  "rewrite": {
-    "originalTitle": "Original clickbait headline",
-    "rewrittenTitle": "",
-    "mode": "gemini_failed",
-    "error": "..."
-  }
-}
-```
-
-## 11. Limitations
-
-### External Dependencies
-
-- Gemini API quota may limit rewrite availability.
-- Article extraction quality depends on each website's HTML structure.
-
-### Rewrite Quality
-
-- Generated rewrites may still require prompt tuning for different news categories.
-- The system avoids rule-based fallback rewriting because headline cleanup alone cannot recover information hidden by clickbait headlines.
-
-### Performance
-
-- Gemini rewriting may take several seconds because the model receives article context.
-- Rewriting is triggered on hover to reduce API usage and latency for headlines the user does not inspect.
-
-## 12. Current Status
-
-Completed MVP:
-
-```text
-headline extraction
-→ clickbait classification
-→ browser highlight
-→ article extraction
-→ Gemini rewrite
-→ tooltip result
-```
+-   Article extraction quality depends on each website's HTML structure.
+-   Gemini API quota may limit rewrite availability.
+-   Gemini rewriting may take several seconds because the model receives article context.
+-   Generated rewrites may still require prompt tuning for different news categories.
